@@ -235,7 +235,7 @@ def export_apps_to_format(filename,
 
     dump_classes = []
     for _, vm, vmx in s.get_objects_dex():
-        print("Decompilation ...", end=' ')
+        logger.info("Decompilation ...", end=' ')
         sys.stdout.flush()
 
         if decompiler_type == "dex2jad":
@@ -259,7 +259,7 @@ def export_apps_to_format(filename,
                                                                   androconf.CONF["OPTIONS_FERNFLOWER"],
                                                                   androconf.CONF["TMP_DIRECTORY"]))
 
-        print("End")
+        logger.info("End Decompilation")
 
         if jar:
             print("jar ...", end=' ')
@@ -268,7 +268,7 @@ def export_apps_to_format(filename,
                                              androconf.CONF["TMP_DIRECTORY"]).get_jar()
             shutil.move(filenamejar, os.path.join(output, "classes.jar"))
             print("End")
-
+        logger.info("Dumping...")
         
         for method in vm.get_methods():
             if methods_filter_expr:
@@ -313,7 +313,7 @@ def export_apps_to_format(filename,
             #with open(filename + ".ag", "w") as fd:
             #    fd.write(bytecode_buff)
             #print()
-
+        logger.info("End dumping!")
 
 def valid_class_name(class_name):
     if class_name[-1] == ";":

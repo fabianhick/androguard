@@ -32,7 +32,7 @@ from main import (androarsc_main,
 def entry_point(verbosity):
     if verbosity == None:
        util.set_log("INFO")
-    logger.add("androguard.log", retention="10 days")
+    #logger.add("androguard.log", retention="10 days")
     
 
 @entry_point.command()
@@ -364,7 +364,7 @@ def cgdecompile(input_, file_, output, format_, jar, limit, decompiler):
     else:
         fname = file_
 
-    s = session.Session()
+    s = session.Session(db_name='androguard_' + output[:-4] + '.db')
     with open(fname, "rb") as fd:
         s.add(fname, fd.read())
     export_apps_to_format(fname, s, output[:-4], limit,

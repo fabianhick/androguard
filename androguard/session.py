@@ -40,7 +40,7 @@ class Session:
 
 
     """
-    def __init__(self, export_ipython=False):
+    def __init__(self, export_ipython=False, db_name='androguard.db'):
         """
         Create a new Session object
 
@@ -50,7 +50,7 @@ class Session:
         self._setup_objects()
         self.export_ipython = export_ipython
 
-        self.db = dataset.connect('sqlite:///androguard.db')
+        self.db = dataset.connect('sqlite:///' + db_name)
         logger.info("Opening database {}".format(self.db))
         self.table_information = self.db["information"]
         self.table_session = self.db["session"]

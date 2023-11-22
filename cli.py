@@ -364,7 +364,7 @@ def cgdecompile(input_, file_, output, format_, jar, limit, decompiler):
     else:
         fname = file_
 
-    s = session.Session(db_name='androguard_' + output[:-4] + '.db')
+    s = session.Session(db_name=output[:-4] + '_androguard.db')
     with open(fname, "rb") as fd:
         s.add(fname, fd.read())
     export_apps_to_format(fname, s, output[:-4], limit,

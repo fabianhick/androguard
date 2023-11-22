@@ -71,6 +71,99 @@ def androarsc_main(arscobj, outp=None, package=None, typ=None, locale=None):
     else:
         sys.stdout.write(highlight(buff.decode("UTF-8"), get_lexer_by_name("xml"), TerminalFormatter()))
 
+def androcg_main(verbose,
+                 APK,
+                 classname,
+                 methodname,
+                 descriptor,
+                 accessflag,
+                 no_isolated,
+                 show,
+                 output):
+    from androguard.core.androconf import show_logging
+    from androguard.core.bytecode import FormatClassToJava
+    from androguard.misc import AnalyzeAPK
+    import networkx as nx
+    import logging
+    log = logging.getLogger("androcfg")
+    if verbose:
+        show_logging(logging.INFO)
+
+    a, d, dx = AnalyzeAPK(APK)
+
+    entry_points = map(FormatClassToJava,
+                       a.get_activities() + a.get_providers() +
+                       a.get_services() + a.get_receivers())
+    entry_points = list(entry_points)
+
+    log.info("Found The following entry points by search AndroidManifest.xml: "
+             "{}".format(entry_points))
+
+    CG = dx.get_call_graph(classname,
+                           methodname,
+                           descriptor,
+                           accessflag,
+                           no_isolated,
+                           entry_points,
+                           )
+
+    write_methods = dict(gml=_write_gml,
+                         gexf=nx.write_gexf,
+                         gpickle=nx.write_gpickle,
+                         graphml=nx.write_graphml,
+                         yaml=nx.write_yaml,
+                         net=nx.write_pajek,
+                         )
+
+    if show:
+        plot(CG)
+    else:
+        writer = output.rsplit(".", 1)[1]
+        if writer in ["bz2", "gz"]:
+            writer = output.rsplit(".", 2)[1]
+        if writer not in write_methods:
+            print("Could not find a method to export files to {}!"
+                  .format(writer))
+            sys.exit(1)
+
+        write_methods[writer](CG, output)
+
+
+def plot(cg):
+    """
+    Plot the call graph using matplotlib
+    For larger graphs, this should not be used, as it is very slow
+    and probably you can not see anything on it.
+
+    :param cg: A networkx call graph to plot
+    """
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    pos = nx.spring_layout(cg)
+
+    internal = []
+    external = []
+
+    for n in cg.nodes:
+        if n.is_external():
+            external.append(n)
+        else:
+            internal.append(n)
+
+    nx.draw_networkx_nodes(cg, pos=pos, node_color='r', nodelist=internal)
+    nx.draw_networkx_nodes(cg, pos=pos, node_color='b', nodelist=external)
+    nx.draw_networkx_edges(cg, pos, arrows=True)
+    nx.draw_networkx_labels(cg, pos=pos, labels={x: "{}{}".format(x.class_name, x.name) for x in cg.nodes})
+    plt.draw()
+    plt.show()
+
+
+def _write_gml(G, path):
+    """
+    Wrapper around nx.write_gml
+    """
+    import networkx as nx
+    return nx.write_gml(G, path, stringizer=str)
 
 def export_apps_to_format(filename,
                           s,
@@ -81,8 +174,11 @@ def export_apps_to_format(filename,
                           form=None):
     from androguard.misc import clean_file_name
     from androguard.core.dex import DEX
-    from androguard.core.bytecode import method2dot, method2format
+    from androguard.core.bytecode import method2dot, method2format, method2simpledot, method2dotaggregated
     from androguard.decompiler import decompiler
+    from androguard.core.bytecode import FormatClassToJava
+    import networkx as nx
+
     print("Dump information {} in {}".format(filename, output))
 
     if not os.path.exists(output):
@@ -96,9 +192,49 @@ def export_apps_to_format(filename,
     methods_filter_expr = None
     if methods_filter:
         methods_filter_expr = re.compile(methods_filter)
+    
+    a, _, dx = s.get_objects_apk(filename)
+
+    cg_output = os.path.join(output, "callgraph.gml")
+    classname = '.*'
+    methodname = '.*'
+    descriptor = '.*'
+    accessflag = '.*'
+    no_isolated = False
+
+    entry_points = map(FormatClassToJava,
+                    a.get_activities() + a.get_providers() +
+                    a.get_services() + a.get_receivers())
+    entry_points = list(entry_points)
+
+    logger.info("Found The following entry points by search AndroidManifest.xml: "  "{}".format(entry_points))
+
+    CG = dx.get_call_graph(classname,
+                            methodname,
+                            descriptor,
+                            accessflag,
+                            no_isolated,
+                            entry_points,
+                            )
+
+    write_methods = dict(gml=_write_gml,
+                            gexf=nx.write_gexf,
+                            #gpickle=nx.write_gpickle,
+                            graphml=nx.write_graphml,
+                            #yaml=nx.write_yaml,
+                            net=nx.write_pajek,
+                            )
+    
+    writer = cg_output.rsplit(".", 1)[1]
+    if writer in ["bz2", "gz"]:
+        writer = cg_output.rsplit(".", 2)[1]
+    if writer not in write_methods:
+        logger.error("Could not find a method to export files to {}!".format(writer))
+        sys.exit(1)
+    write_methods[writer](CG, cg_output)
 
     dump_classes = []
-    for _, vm, vmx in s.get_objects_dex():
+    for a, vm, vmx in s.get_objects_dex():
         print("Decompilation ...", end=' ')
         sys.stdout.flush()
 
@@ -133,6 +269,7 @@ def export_apps_to_format(filename,
             shutil.move(filenamejar, os.path.join(output, "classes.jar"))
             print("End")
 
+        
         for method in vm.get_methods():
             if methods_filter_expr:
                 msig = "{}{}{}".format(method.get_class_name(), method.get_name(),
@@ -145,35 +282,37 @@ def export_apps_to_format(filename,
             filename_class = os.path.join(output, filename_class)
             create_directory(filename_class)
 
-            print("Dump {} {} {} ...".format(method.get_class_name(),
-                                         method.get_name(),
-                                         method.get_descriptor()), end=' ')
+            #print("Dump {} {} {} ...".format(method.get_class_name(),
+            #                             method.get_name(),
+            #                             method.get_descriptor()), end=' ')
 
             filename = clean_file_name(os.path.join(filename_class, method.get_short_string()))
 
-            buff = method2dot(vmx.get_method(method))
+            #buff = method2dot(vmx.get_method(method))
+            buff = method2dotaggregated(vmx.get_method(method))
+            buff.write_raw(filename + ".dot")
             # Write Graph of method
-            if form:
-                print("%s ..." % form, end=' ')
-                method2format(filename + "." + form, form, None, buff)
+            #if form:
+            #    print("%s ..." % form, end=' ')
+            #    method2format(filename + "." + form, form, None, buff)
 
             # Write the Java file for the whole class
-            if str(method.get_class_name()) not in dump_classes:
-                print("source codes ...", end=' ')
-                current_class = vm.get_class(method.get_class_name())
-                current_filename_class = valid_class_name(str(current_class.get_name()))
+            #if str(method.get_class_name()) not in dump_classes:
+            #    print("source codes ...", end=' ')
+            #    current_class = vm.get_class(method.get_class_name())
+            #    current_filename_class = valid_class_name(str(current_class.get_name()))
 
-                current_filename_class = os.path.join(output, current_filename_class + ".java")
-                with open(current_filename_class, "w") as fd:
-                    fd.write(current_class.get_source())
-                dump_classes.append(method.get_class_name())
+            #    current_filename_class = os.path.join(output, current_filename_class + ".java")
+            #    with open(current_filename_class, "w") as fd:
+            #        fd.write(current_class.get_source())
+            #    dump_classes.append(method.get_class_name())
 
             # Write SMALI like code
-            print("bytecodes ...", end=' ')
-            bytecode_buff = DEX.get_bytecodes_method(vm, vmx, method)
-            with open(filename + ".ag", "w") as fd:
-                fd.write(bytecode_buff)
-            print()
+            #print("bytecodes ...", end=' ')
+            #bytecode_buff = DEX.get_bytecodes_method(vm, vmx, method)
+            #with open(filename + ".ag", "w") as fd:
+            #    fd.write(bytecode_buff)
+            #print()
 
 
 def valid_class_name(class_name):

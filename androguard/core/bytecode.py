@@ -392,6 +392,158 @@ def method2dot(mx, colors=None):
 
     return {'name': method_label, 'nodes': blocks_html, 'edges': edges_html}
 
+def method2dotaggregated(mx, colors=None):
+    """
+    Export analysis method to aggregated dot format.
+
+    A control flow graph is created by using the concept of BasicBlocks.
+    Each BasicBlock is a sequence of opcode without any jumps or branch.
+
+    :param mx: :class:`~androguard.core.analysis.analysis.MethodAnalysis`
+    :param colors: dict of colors to use, if colors is None the default colors are used
+
+    :returns: a string which contains the dot graph containing aggregated DEX instructions
+    """
+
+    method = mx.get_method()
+
+    # This is used as a seed to create unique hashes for the nodes
+    sha256 = hashlib.sha256((mx.get_method().get_class_name() + mx.get_method().get_name() + mx.get_method().get_descriptor()).encode("utf-8")).hexdigest()
+
+    new_links = []
+
+    import pydot
+
+    graph = pydot.Dot(graph_type='digraph')
+    nodes = {}
+
+    edges_to_be_processed = []
+
+    # Go through all basic blocks and create the CFG
+    for basic_block in mx.basic_blocks:
+        ins_idx = basic_block.start
+        block_id = hashlib.md5((sha256 + basic_block.get_name()).encode("utf-8")).hexdigest()
+
+#        content = link_tpl.format('header')
+        instruction_count_dict = {}
+
+        for instruction in basic_block.get_instructions():
+            if instruction.get_op_value() in (0x2b, 0x2c):
+                new_links.append((basic_block, ins_idx, instruction.get_ref_off() * 2 + ins_idx))
+            elif instruction.get_op_value() == 0x26:
+                new_links.append((basic_block, ins_idx, instruction.get_ref_off() * 2 + ins_idx))
+
+#            operands = instruction.get_operands(ins_idx)
+
+#            output = ", ".join(_get_operand_html(i, registers, colors) for i in operands)
+
+#            bg_idx = colors["bg_idx"]
+#            if ins_idx == 0 and "bg_start_idx" in colors:
+#                bg_idx = colors["bg_start_idx"]
+            instruction_name = instruction.get_op_value()
+            instruction_count_dict[instruction_name] = instruction_count_dict.get(instruction_name, 0) + 1
+
+#            content += label_tpl % (
+#                bg_idx, colors["idx"], ins_idx, colors["bg_instruction"],
+#                colors["instruction_name"],
+#                instruction.get_name(), output)
+
+            ins_idx += instruction.get_length()
+
+        # all blocks from one method parsed
+        # updating dot HTML content
+#        content += link_tpl.format('tail')
+#        blocks_html += node_tpl % (block_id, content)
+        # TODO: ANNOTATE EDGES
+        # Block edges color treatment (conditional branchs colors)
+        #val = colors["true_branch"]
+        #if len(basic_block.childs) > 1:
+        #    val = colors["false_branch"]
+        #elif len(basic_block.childs) == 1:
+        #    val = colors["jump_branch"]
+
+        values = None
+        # The last instruction is important and still set from the loop
+        # FIXME: what if there is no instruction in the basic block?
+        if instruction.get_op_value() in (0x2b, 0x2c) and len(basic_block.childs) > 1:
+#            val = colors["default_branch"]
+            values = ["default"]
+            values.extend(basic_block.get_special_ins(ins_idx - instruction.get_length()).get_values())
+
+        node_label = ','.join([f'{instr}:{count}' for instr, count in instruction_count_dict.items()])
+        node = pydot.Node(len(nodes), label=node_label)
+        graph.add_node(node)
+        nodes[block_id] = node
+
+
+        # updating dot edges
+        for DVMBasicMethodBlockChild in basic_block.childs:
+#            label_edge = ""
+
+#            if values:
+#                label_edge = values.pop(0)
+
+            child_id = hashlib.md5((sha256 + DVMBasicMethodBlockChild[-1].get_name()).encode("utf-8")).hexdigest()
+            edges_to_be_processed.append((block_id, child_id))
+
+#            edge = pydot.Edge(nodes[block_id], nodes[child_id])
+#            graph.add_edge(edge)
+
+ #           edges_html += "struct_{}:tail -> struct_{}:header  [color=\"{}\", label=\"{}\"];\n".format(block_id,
+ #                                                                                                      child_id, val,
+ #                                                                                                      label_edge)
+
+            # color switch
+#            if val == colors["false_branch"]:
+#                val = colors["true_branch"]
+#            elif val == colors["default_branch"]:
+#                val = colors["true_branch"]
+
+        exception_analysis = basic_block.get_exception_analysis()
+        if exception_analysis:
+            for exception_elem in exception_analysis.exceptions:
+                exception_block = exception_elem[-1]
+                if exception_block:
+                    exception_id = hashlib.md5((sha256 + exception_block.get_name()).encode("utf-8")).hexdigest()
+                    edges_to_be_processed.append((block_id, exception_id))
+
+#                    edge = pydot.Edge(nodes[block_id], nodes[exception_id])
+#                    graph.add_edge(edge)
+#                    edges_html += "struct_{}:tail -> struct_{}:header  [color=\"{}\", label=\"{}\"];\n".format(
+#                        block_id, exception_id, "black", exception_elem[0])
+    # before not all nodes known...
+    for (parent, child) in edges_to_be_processed:
+        edge = pydot.Edge(nodes[parent], nodes[child])
+        graph.add_edge(edge)
+
+    for link in new_links:
+        basic_block = link[0]
+        DVMBasicMethodBlockChild = mx.basic_blocks.get_basic_block(link[2])
+
+        if DVMBasicMethodBlockChild:
+            block_id = hashlib.md5((sha256 + basic_block.get_name()).encode("utf-8")).hexdigest()
+            child_id = hashlib.md5((sha256 + DVMBasicMethodBlockChild.get_name()).encode("utf-8")).hexdigest()
+
+        edge = pydot.Edge(nodes[block_id], nodes[child_id])
+        graph.add_edge(edge)
+
+#            edges_html += "struct_{}:tail -> struct_{}:header  [color=\"{}\", label=\"data(0x{:x}) to @0x{:x}\", style=\"dashed\"];\n".format(
+#                block_id, child_id, "yellow", link[1], link[2])
+
+#    method_label = method.get_class_name() + "." + method.get_name() + "->" + method.get_descriptor()
+
+#    method_information = method.get_information()
+#    if method_information:
+#        method_label += "\\nLocal registers v{} ... v{}".format(*method_information["registers"])
+#        if "params" in method_information:
+#            for register, rtype in method_information["params"]:
+#                method_label += "\\nparam v%d = %s" % (register, rtype)
+#        method_label += "\\nreturn = %s" % (method_information["return"])
+
+#    return {'name': method_label, 'nodes': blocks_html, 'edges': edges_html}
+
+    return graph
+
 
 def method2format(output, _format="png", mx=None, raw=None):
     """
@@ -484,6 +636,62 @@ def method2png(output, mx, raw=False):
         buff = method2dot(mx)
 
     method2format(output, "png", mx, buff)
+
+def method2simpledot(mx):
+    """
+    Export analysis method to simplified dot format focusing on instruction count per node.
+
+    :param mx: :class:`~androguard.core.analysis.analysis.MethodAnalysis`
+    :returns: a pydot.Dot object which contains the simplified dot graph
+    """
+    import pydot
+    
+    # Create a new dot graph
+    graph = pydot.Dot(graph_type='digraph')
+    
+    # This is used as a seed to create unique hashes for the nodes
+    sha256 = hashlib.sha256((mx.get_method().get_class_name() + 
+                             mx.get_method().get_name() + 
+                             mx.get_method().get_descriptor()).encode("utf-8")).hexdigest()
+    
+    # Dictionary to hold the pydot.Node objects, indexed by block_id
+    nodes = {}
+    
+    # Loop over each basic block in the MethodAnalysis
+    for basic_block in mx.basic_blocks:
+        
+        # Compute a unique identifier for each basic block
+        block_id = hashlib.md5((sha256 + basic_block.get_name()).encode("utf-8")).hexdigest()
+        
+        # Dictionary to hold the counts of instructions in the current basic block
+        instruction_count_dict = {}
+        
+        # Loop over each instruction in the basic block
+        for instruction in basic_block.get_instructions():
+            
+            # Get the name of the instruction
+            instruction_name = instruction.get_name()
+            
+            # Increment the count in the dictionary for the current basic block
+            instruction_count_dict[instruction_name] = instruction_count_dict.get(instruction_name, 0) + 1
+        
+        # Create a node in the graph for the current basic block
+        node_label = '\\n'.join([f'{instr}: {count}' for instr, count in instruction_count_dict.items()])
+        node = pydot.Node(block_id, label=node_label)
+        graph.add_node(node)
+        nodes[block_id] = node
+        
+        # Create edges in the graph based on the child blocks
+        for child in basic_block.childs:
+            child_id = hashlib.md5((sha256 + child[-1].get_name()).encode("utf-8")).hexdigest()
+            if child_id not in nodes:
+                child_node = pydot.Node(child_id)
+                graph.add_node(child_node)
+                nodes[child_id] = child_node
+            edge = pydot.Edge(nodes[block_id], nodes[child_id])
+            graph.add_edge(edge)
+    
+    return graph
 
 
 def method2jpg(output, mx, raw=False):

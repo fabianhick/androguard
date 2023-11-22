@@ -234,7 +234,7 @@ def export_apps_to_format(filename,
     write_methods[writer](CG, cg_output)
 
     dump_classes = []
-    for a, vm, vmx in s.get_objects_dex():
+    for _, vm, vmx in s.get_objects_dex():
         print("Decompilation ...", end=' ')
         sys.stdout.flush()
 

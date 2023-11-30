@@ -179,13 +179,13 @@ def export_apps_to_format(filename,
     from androguard.core.bytecode import FormatClassToJava
     import networkx as nx
 
-    print("Dump information {} in {}".format(filename, output))
+    logger.info("Dump information {} in {}".format(filename, output))
 
     if not os.path.exists(output):
-        print("Create directory %s" % output)
+        logger.info("Create directory %s" % output)
         os.makedirs(output)
     else:
-        print("Clean directory %s" % output)
+        logger.info("Clean directory %s" % output)
         androconf.rrmdir(output)
         os.makedirs(output)
 
@@ -209,7 +209,7 @@ def export_apps_to_format(filename,
 
     logger.info("Found The following entry points by search AndroidManifest.xml: "  "{}".format(entry_points))
 
-    CG = dx.get_call_graph(classname,
+    CG = dx.get_modified_call_graph(classname,
                             methodname,
                             descriptor,
                             accessflag,
@@ -233,87 +233,117 @@ def export_apps_to_format(filename,
         sys.exit(1)
     write_methods[writer](CG, cg_output)
 
+
+
     dump_classes = []
-    for _, vm, vmx in s.get_objects_dex():
-        logger.info("Decompilation ...", end=' ')
-        sys.stdout.flush()
+    cfg_output = os.path.join(output, "data.json")
+    import networkx as nx
+    from collections import OrderedDict
+    import pandas as pd
 
-        if decompiler_type == "dex2jad":
-            vm.set_decompiler(decompiler.DecompilerDex2Jad(vm,
-                                                           androconf.CONF["BIN_DEX2JAR"],
-                                                           androconf.CONF["BIN_JAD"],
-                                                           androconf.CONF["TMP_DIRECTORY"]))
-        elif decompiler_type == "dex2winejad":
-            vm.set_decompiler(decompiler.DecompilerDex2WineJad(vm,
-                                                               androconf.CONF["BIN_DEX2JAR"],
-                                                               androconf.CONF["BIN_WINEJAD"],
-                                                               androconf.CONF["TMP_DIRECTORY"]))
-        elif decompiler_type == "ded":
-            vm.set_decompiler(decompiler.DecompilerDed(vm,
-                                                       androconf.CONF["BIN_DED"],
-                                                       androconf.CONF["TMP_DIRECTORY"]))
-        elif decompiler_type == "dex2fernflower":
-            vm.set_decompiler(decompiler.DecompilerDex2Fernflower(vm,
-                                                                  androconf.CONF["BIN_DEX2JAR"],
-                                                                  androconf.CONF["BIN_FERNFLOWER"],
-                                                                  androconf.CONF["OPTIONS_FERNFLOWER"],
-                                                                  androconf.CONF["TMP_DIRECTORY"]))
+    with open(cfg_output, 'a') as file:
+        methods = OrderedDict()
+        method_names = []
+        file.write('{"acfg_list": [')
+        for _, vm, vmx in s.get_objects_dex():
+            logger.info("Decompilation ...", end=' ')
+            sys.stdout.flush()
 
-        logger.info("End Decompilation")
+            if decompiler_type == "dex2jad":
+                vm.set_decompiler(decompiler.DecompilerDex2Jad(vm,
+                                                            androconf.CONF["BIN_DEX2JAR"],
+                                                            androconf.CONF["BIN_JAD"],
+                                                            androconf.CONF["TMP_DIRECTORY"]))
+            elif decompiler_type == "dex2winejad":
+                vm.set_decompiler(decompiler.DecompilerDex2WineJad(vm,
+                                                                androconf.CONF["BIN_DEX2JAR"],
+                                                                androconf.CONF["BIN_WINEJAD"],
+                                                                androconf.CONF["TMP_DIRECTORY"]))
+            elif decompiler_type == "ded":
+                vm.set_decompiler(decompiler.DecompilerDed(vm,
+                                                        androconf.CONF["BIN_DED"],
+                                                        androconf.CONF["TMP_DIRECTORY"]))
+            elif decompiler_type == "dex2fernflower":
+                vm.set_decompiler(decompiler.DecompilerDex2Fernflower(vm,
+                                                                    androconf.CONF["BIN_DEX2JAR"],
+                                                                    androconf.CONF["BIN_FERNFLOWER"],
+                                                                    androconf.CONF["OPTIONS_FERNFLOWER"],
+                                                                    androconf.CONF["TMP_DIRECTORY"]))
 
-        if jar:
-            print("jar ...", end=' ')
-            filenamejar = decompiler.Dex2Jar(vm,
-                                             androconf.CONF["BIN_DEX2JAR"],
-                                             androconf.CONF["TMP_DIRECTORY"]).get_jar()
-            shutil.move(filenamejar, os.path.join(output, "classes.jar"))
-            print("End")
-        logger.info("Dumping...")
-        
-        for method in vm.get_methods():
-            if methods_filter_expr:
-                msig = "{}{}{}".format(method.get_class_name(), method.get_name(),
-                                   method.get_descriptor())
-                if not methods_filter_expr.search(msig):
+            
+
+            if jar:
+                print("jar ...", end=' ')
+                filenamejar = decompiler.Dex2Jar(vm,
+                                                androconf.CONF["BIN_DEX2JAR"],
+                                                androconf.CONF["TMP_DIRECTORY"]).get_jar()
+                shutil.move(filenamejar, os.path.join(output, "classes.jar"))
+                print("End")
+            logger.info("Dumping...")
+            
+            for method in vm.get_methods():
+                if methods_filter_expr:
+                    msig = "{}{}{}".format(method.get_class_name(), method.get_name(),
+                                    method.get_descriptor())
+                    if not methods_filter_expr.search(msig):
+                        continue
+
+                # Current Folder to write to
+                #filename_class = valid_class_name(str(method.get_class_name()))
+                #filename_class = os.path.join(output, filename_class)
+                #create_directory(filename_class)
+
+                #print("Dump {} {} {} ...".format(method.get_class_name(),
+                #                             method.get_name(),
+                #                             method.get_descriptor()), end=' ')
+
+                #filename = clean_file_name(os.path.join(filename_class, method.get_short_string()))
+
+                #buff = method2dot(vmx.get_method(method))
+                if len(list(vmx.get_method(method).get_method().get_instructions())) == 0:
                     continue
+                method_name = "{}{}{}".format(method.get_class_name(), method.get_name(),method.get_descriptor())
+                method_id = len(methods)
+                methods[method_name] = method_id
+                method_names.append(method_name)
+                file.write('{ "name": "' + method_name + "\",\n")
 
-            # Current Folder to write to
-            filename_class = valid_class_name(str(method.get_class_name()))
-            filename_class = os.path.join(output, filename_class)
-            create_directory(filename_class)
+                cfg = method2dotaggregated(vmx.get_method(method))
+                
+                cfgdf = nx.to_pandas_edgelist(cfg)
 
-            #print("Dump {} {} {} ...".format(method.get_class_name(),
-            #                             method.get_name(),
-            #                             method.get_descriptor()), end=' ')
+                cfg_edges_s = list(cfgdf.source)
+                cfg_edges_t = list(cfgdf.target)
+                cfg_features = nx.get_node_attributes(cfg, "features")
 
-            filename = clean_file_name(os.path.join(filename_class, method.get_short_string()))
+                file.write('"edges": [' + str(cfg_edges_s) + "," + str(cfg_edges_t) + "],\n")
+                file.write('"features": ' + str(cfg_features) + "},\n")
+                #buff.append_to_file(file)
+                # Write Graph of method
+                #if form:
+                #    print("%s ..." % form, end=' ')
+                #    method2format(filename + "." + form, form, None, buff)
 
-            #buff = method2dot(vmx.get_method(method))
-            buff = method2dotaggregated(vmx.get_method(method))
-            buff.write_raw(filename + ".dot")
-            # Write Graph of method
-            #if form:
-            #    print("%s ..." % form, end=' ')
-            #    method2format(filename + "." + form, form, None, buff)
+                # Write the Java file for the whole class
+                #if str(method.get_class_name()) not in dump_classes:
+                #    print("source codes ...", end=' ')
+                #    current_class = vm.get_class(method.get_class_name())
+                #    current_filename_class = valid_class_name(str(current_class.get_name()))
 
-            # Write the Java file for the whole class
-            #if str(method.get_class_name()) not in dump_classes:
-            #    print("source codes ...", end=' ')
-            #    current_class = vm.get_class(method.get_class_name())
-            #    current_filename_class = valid_class_name(str(current_class.get_name()))
+                #    current_filename_class = os.path.join(output, current_filename_class + ".java")
+                #    with open(current_filename_class, "w") as fd:
+                #        fd.write(current_class.get_source())
+                #    dump_classes.append(method.get_class_name())
 
-            #    current_filename_class = os.path.join(output, current_filename_class + ".java")
-            #    with open(current_filename_class, "w") as fd:
-            #        fd.write(current_class.get_source())
-            #    dump_classes.append(method.get_class_name())
-
-            # Write SMALI like code
-            #print("bytecodes ...", end=' ')
-            #bytecode_buff = DEX.get_bytecodes_method(vm, vmx, method)
-            #with open(filename + ".ag", "w") as fd:
-            #    fd.write(bytecode_buff)
-            #print()
-        logger.info("End dumping!")
+                # Write SMALI like code
+                #print("bytecodes ...", end=' ')
+                #bytecode_buff = DEX.get_bytecodes_method(vm, vmx, method)
+                #with open(filename + ".ag", "w") as fd:
+                #    fd.write(bytecode_buff)
+                #print()
+            file.write('], "method_names": ' + str(method_names) + "}")
+            logger.info("End dumping!")
+            logger.info("End Decompilation")
 
 def valid_class_name(class_name):
     if class_name[-1] == ";":

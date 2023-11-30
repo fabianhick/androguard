@@ -1821,7 +1821,7 @@ class Analysis:
                     # instead...
                     if no_external and isinstance(z, ExternalMethod):
                         continue
-                    # FIXME: This is a hack to get it working, as regular expressions don't compile atm :( 
+                    # FIXME: This is a hack to get it working, as regular expressions don't compile atm :(
                     #if re.match(methodname, z.get_name()) and \
                     #   re.match(descriptor, z.get_descriptor()) and \
                     #   re.match(accessflags, z.get_access_flags_string()):
@@ -1903,8 +1903,10 @@ class Analysis:
             """
             if method in G.nodes:
                 return
-
-            G.add_node(method,
+            msig = "{}{}{}".format(method.class_name, method.name,
+                                    method.get_descriptor())
+            
+            G.add_node(msig,
                        external=method.is_external(),
                        entrypoint=method.class_name in entry_points,
                        native="native" in method.access,
@@ -1915,6 +1917,89 @@ class Analysis:
                        )
 
         CG = nx.MultiDiGraph()
+
+        # Note: If you create the CG from many classes at the same time, the drawing
+        # will be a total mess... Hence it is recommended to reduce the number of nodes beforehand.
+        # Obviously, you can always do this later at the costs of computational power.
+        for m in self.find_methods(classname=classname, methodname=methodname,
+                                   descriptor=descriptor, accessflags=accessflags):
+            #logger.info("Adding Method '{}' to callgraph".format(m.full_name))
+
+            if no_isolated and len(m.get_xref_to()) == 0 and len(m.get_xref_from()) == 0:
+                logger.info("Skipped {}, because if has no xrefs".format(m.full_name))
+                continue
+
+            _add_node(CG, m)
+
+            for _, callee, offset in m.get_xref_to():
+                _add_node(CG, callee)
+                CG.add_edge(m, callee, key=offset, offset=offset)
+
+            for _, caller, offset in m.get_xref_from():
+                # If _all_ methods are added to the CG, this will not make any difference.
+                # But, if only a single class is chosen as a seed point, we require this information too!
+                # This is particularly useful for external classes, as they do not have xref_to,
+                # thus if an external class is chosen as starting point, it will generate an empty graph.
+                _add_node(CG, caller)
+                CG.add_edge(caller, m, key=offset, offset=offset)
+
+        return CG
+
+    def get_modified_call_graph(self, classname=".*", methodname=".*", descriptor=".*",
+                       accessflags=".*", no_isolated=False, entry_points=[]):
+        """
+        Generate a directed graph based on the methods found by the filters applied.
+        The filters are the same as in
+        :meth:`~androguard.core.analaysis.analaysis.Analysis.find_methods`
+        A networkx.MultiDiGraph is returned, containing all xrefs.
+        That means a method which calls another method multiple times, will have multiple
+        edges between them. Attached to the edge is the attribute `offset`, which gives
+        the code offset inside the method of the call.
+        Specifying filters will not remove the methods if they are called by some other method.
+        The callgraph will check for both directions of edges. Thus, if you specify a single class
+        as input, it will contain all classes which are called by this class (xref_to),
+        as well as all methods who calls the specified one (xref_from).
+        Each node will contain the following meta information as attribute:
+        * external: is the method external or not (boolean)
+        * entrypoint: is the method a known entry point (boolean)
+        * native: is the method a native method by signature (boolean)
+        * public: is the method declared public (boolean)
+        * static: is the method declared static (boolean)
+        * vm: An ID of the DEX file where this method is declared or 0 if external (signed int)
+        * codesize: size of code of the method or zero if external (int)
+        :param classname: regular expression of the classname (default: ".*")
+        :param methodname: regular expression of the methodname (default: ".*")
+        :param descriptor: regular expression of the descriptor (default: ".*")
+        :param accessflags: regular expression of the access flags (default: ".*")
+        :param no_isolated: remove isolated nodes from the graph, e.g. methods which do not call anything (default: False)
+        :param entry_points: A list of classes that are marked as entry point
+        :rtype: networkx.MultiDiGraph
+        """
+
+        def _add_node(G, method):
+            """
+            Wrapper to add methods to a graph without duplication
+            :param nx.MultiDiGraph G:
+            :param MethodAnalysis method:
+            """
+            if method in G.nodes:
+                return
+            msig = "{}{}{}".format(method.class_name, method.name,
+                                    method.get_descriptor())
+            external=method.is_external()
+            if not external and len(list(method.get_method().get_instructions())) == 0:
+                external = 1
+            G.add_node(msig,
+                       external=external,
+                       entrypoint=method.class_name in entry_points,
+                       native="native" in method.access,
+                       public="public" in method.access,
+                       static="static" in method.access,
+                       vm=hash(method.get_method().CM.vm) if not method.is_external() else 0,
+                       codesize=len(list(method.get_method().get_instructions())) if not method.is_external() else 0,
+                       )
+
+        CG = nx.DiGraph()
 
         # Note: If you create the CG from many classes at the same time, the drawing
         # will be a total mess... Hence it is recommended to reduce the number of nodes beforehand.

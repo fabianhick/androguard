@@ -392,9 +392,9 @@ def method2dot(mx, colors=None):
 
     return {'name': method_label, 'nodes': blocks_html, 'edges': edges_html}
 
-def method2dotaggregated(mx, colors=None):
+def method2dotaggregated(mx):
     """
-    Export analysis method to aggregated dot format.
+    Export analysis method to aggregated networkx format.
 
     A control flow graph is created by using the concept of BasicBlocks.
     Each BasicBlock is a sequence of opcode without any jumps or branch.
@@ -402,7 +402,7 @@ def method2dotaggregated(mx, colors=None):
     :param mx: :class:`~androguard.core.analysis.analysis.MethodAnalysis`
     :param colors: dict of colors to use, if colors is None the default colors are used
 
-    :returns: a string which contains the dot graph containing aggregated DEX instructions
+    :returns: a string which contains the networkx graph containing aggregated DEX instructions
     """
 
     method = mx.get_method()
@@ -412,10 +412,12 @@ def method2dotaggregated(mx, colors=None):
 
     new_links = []
 
-    import pydot
+    import networkx as nx
 
-    graph = pydot.Dot(graph_type='digraph')
+    graph = nx.DiGraph()
     nodes = {}
+    node_text = ""
+    edge_text = ""
 
     edges_to_be_processed = []
 
@@ -458,7 +460,7 @@ def method2dotaggregated(mx, colors=None):
         # Block edges color treatment (conditional branchs colors)
         #val = colors["true_branch"]
         #if len(basic_block.childs) > 1:
-        #    val = colors["false_branch"]
+        #    val = colors["false_branch"])
         #elif len(basic_block.childs) == 1:
         #    val = colors["jump_branch"]
 
@@ -471,9 +473,10 @@ def method2dotaggregated(mx, colors=None):
             values.extend(basic_block.get_special_ins(ins_idx - instruction.get_length()).get_values())
 
         node_label = ','.join([f'{instr}:{count}' for instr, count in instruction_count_dict.items()])
-        node = pydot.Node(len(nodes), label=node_label)
-        graph.add_node(node)
-        nodes[block_id] = node
+        #node = pydot.Node(len(nodes), label=node_label)
+        current_num = len(nodes)
+        graph.add_node(current_num, features=node_label)
+        nodes[block_id] = current_num
 
 
         # updating dot edges
@@ -513,8 +516,8 @@ def method2dotaggregated(mx, colors=None):
 #                        block_id, exception_id, "black", exception_elem[0])
     # before not all nodes known...
     for (parent, child) in edges_to_be_processed:
-        edge = pydot.Edge(nodes[parent], nodes[child])
-        graph.add_edge(edge)
+        #edge = pydot.Edge(nodes[parent], nodes[child])
+        graph.add_edge(nodes[parent], nodes[child])
 
     for link in new_links:
         basic_block = link[0]
@@ -524,8 +527,8 @@ def method2dotaggregated(mx, colors=None):
             block_id = hashlib.md5((sha256 + basic_block.get_name()).encode("utf-8")).hexdigest()
             child_id = hashlib.md5((sha256 + DVMBasicMethodBlockChild.get_name()).encode("utf-8")).hexdigest()
 
-        edge = pydot.Edge(nodes[block_id], nodes[child_id])
-        graph.add_edge(edge)
+        #edge = pydot.Edge(nodes[block_id], nodes[child_id])
+        graph.add_edge(nodes[block_id], nodes[child_id])
 
 #            edges_html += "struct_{}:tail -> struct_{}:header  [color=\"{}\", label=\"data(0x{:x}) to @0x{:x}\", style=\"dashed\"];\n".format(
 #                block_id, child_id, "yellow", link[1], link[2])

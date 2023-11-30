@@ -1975,6 +1975,9 @@ class Analysis:
         :param entry_points: A list of classes that are marked as entry point
         :rtype: networkx.MultiDiGraph
         """
+        def _msig(method):
+            return "{}{}{}".format(method.class_name, method.name,
+                                    method.get_descriptor())
 
         def _add_node(G, method):
             """
@@ -1982,10 +1985,10 @@ class Analysis:
             :param nx.MultiDiGraph G:
             :param MethodAnalysis method:
             """
-            if method in G.nodes:
+            msig = _msig(method)
+            
+            if msig in CG_nodes_names:
                 return
-            msig = "{}{}{}".format(method.class_name, method.name,
-                                    method.get_descriptor())
             external=method.is_external()
             if not external and len(list(method.get_method().get_instructions())) == 0:
                 external = 1
@@ -1998,9 +2001,13 @@ class Analysis:
                        vm=hash(method.get_method().CM.vm) if not method.is_external() else 0,
                        codesize=len(list(method.get_method().get_instructions())) if not method.is_external() else 0,
                        )
+            CG_nodes_names.append(msig)
+            CG_nodes_external.append(external)
+            #logger.info("Adding Method '{}' to callgraph".format(msig))
 
         CG = nx.DiGraph()
-
+        CG_nodes_names = []
+        CG_nodes_external = []
         # Note: If you create the CG from many classes at the same time, the drawing
         # will be a total mess... Hence it is recommended to reduce the number of nodes beforehand.
         # Obviously, you can always do this later at the costs of computational power.
@@ -2016,7 +2023,7 @@ class Analysis:
 
             for _, callee, offset in m.get_xref_to():
                 _add_node(CG, callee)
-                CG.add_edge(m, callee, key=offset, offset=offset)
+                CG.add_edge(_msig(m), _msig(callee), key=offset, offset=offset)
 
             for _, caller, offset in m.get_xref_from():
                 # If _all_ methods are added to the CG, this will not make any difference.
@@ -2024,9 +2031,9 @@ class Analysis:
                 # This is particularly useful for external classes, as they do not have xref_to,
                 # thus if an external class is chosen as starting point, it will generate an empty graph.
                 _add_node(CG, caller)
-                CG.add_edge(caller, m, key=offset, offset=offset)
+                CG.add_edge(_msig(caller), _msig(m), key=offset, offset=offset)
 
-        return CG
+        return (CG, CG_nodes_names, CG_nodes_external)
 
 
 

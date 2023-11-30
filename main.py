@@ -209,7 +209,7 @@ def export_apps_to_format(filename,
 
     logger.info("Found The following entry points by search AndroidManifest.xml: "  "{}".format(entry_points))
 
-    CG = dx.get_modified_call_graph(classname,
+    CG, cg_nodes_by_label, cg_nodes_by_external  = dx.get_modified_call_graph(classname,
                             methodname,
                             descriptor,
                             accessflag,
@@ -232,8 +232,7 @@ def export_apps_to_format(filename,
         logger.error("Could not find a method to export files to {}!".format(writer))
         sys.exit(1)
     write_methods[writer](CG, cg_output)
-
-
+    #logger.info(CG.nodes)
 
     dump_classes = []
     cfg_output = os.path.join(output, "data.json")
@@ -279,7 +278,7 @@ def export_apps_to_format(filename,
                                                 androconf.CONF["TMP_DIRECTORY"]).get_jar()
                 shutil.move(filenamejar, os.path.join(output, "classes.jar"))
                 print("End")
-            logger.info("Dumping...")
+            logger.info("Dumping cfgs...")
             
             for method in vm.get_methods():
                 if methods_filter_expr:
@@ -306,7 +305,7 @@ def export_apps_to_format(filename,
                 method_id = len(methods)
                 methods[method_name] = method_id
                 method_names.append(method_name)
-                file.write('{ "name": "' + method_name + "\",\n")
+                file.write('{ ')#"name": "' + method_name + "\",\n")
 
                 cfg = method2dotaggregated(vmx.get_method(method))
                 
@@ -341,8 +340,32 @@ def export_apps_to_format(filename,
                 #with open(filename + ".ag", "w") as fd:
                 #    fd.write(bytecode_buff)
                 #print()
+            logger.info("End dumping cfgs!")
+            
+            rename_nodes = {}
+            # Filter the call graph attributes by external or not and rename the nodes in the new graph
+            num_local_functions = len(method_names)
+            counter = num_local_functions
+            CG = nx.convert_node_labels_to_integers(CG)
+            for i in range(len(cg_nodes_by_label)):
+                if cg_nodes_by_external[i]:
+                    rename_nodes[i] = counter
+                    counter = counter + 1
+                    method_names.append(cg_nodes_by_label[i])
+                    #assert len(method_names) == counter
+                else:
+                    rename_nodes[i] = method_names.index(cg_nodes_by_label[i])
+
+            CG = nx.relabel_nodes(CG, rename_nodes)
+
+            cgdf = nx.to_pandas_edgelist(CG)
+            cg_edges_s = list(cgdf.source)
+            cg_edges_t = list(cgdf.target)
+
+            file.write(', "cg_edges": [' + str(cg_edges_s) + "," + str(cg_edges_t) + "],\n")
             file.write('], "method_names": ' + str(method_names) + "}")
-            logger.info("End dumping!")
+
+
             logger.info("End Decompilation")
 
 def valid_class_name(class_name):

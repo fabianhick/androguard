@@ -239,6 +239,7 @@ def export_apps_to_format(filename,
     import networkx as nx
     from collections import OrderedDict
     import pandas as pd
+    import json
 
     with open(cfg_output, 'a') as file:
         methods = OrderedDict()
@@ -280,6 +281,8 @@ def export_apps_to_format(filename,
                 print("End")
             logger.info("Dumping cfgs...")
             
+            first_iteration = True
+
             for method in vm.get_methods():
                 if methods_filter_expr:
                     msig = "{}{}{}".format(method.get_class_name(), method.get_name(),
@@ -305,7 +308,6 @@ def export_apps_to_format(filename,
                 method_id = len(methods)
                 methods[method_name] = method_id
                 method_names.append(method_name)
-                file.write('{ ')#"name": "' + method_name + "\",\n")
 
                 cfg = method2dotaggregated(vmx.get_method(method))
                 
@@ -314,10 +316,13 @@ def export_apps_to_format(filename,
                 cfg_edges_s = list(cfgdf.source)
                 cfg_edges_t = list(cfgdf.target)
                 cfg_features = nx.get_node_attributes(cfg, "features")
-
-                file.write('"edges": [' + str(cfg_edges_s) + "," + str(cfg_edges_t) + "],\n")
-                file.write('"features": ' + str(cfg_features) + "},\n")
-                #buff.append_to_file(file)
+                assert len(cfg_features) == cfg.number_of_nodes()
+                data = {"edges": [cfg_edges_s, cfg_edges_t], "features": cfg_features}
+                if(not first_iteration):
+                    file.write(",\n")
+                else:
+                    first_iteration = False
+                file.write(json.dumps(data))
                 # Write Graph of method
                 #if form:
                 #    print("%s ..." % form, end=' ')
@@ -362,8 +367,8 @@ def export_apps_to_format(filename,
             cg_edges_s = list(cgdf.source)
             cg_edges_t = list(cgdf.target)
 
-            file.write(', "cg_edges": [' + str(cg_edges_s) + "," + str(cg_edges_t) + "],\n")
-            file.write('], "method_names": ' + str(method_names) + "}")
+            file.write('],\n "cg_edges": [' + str(cg_edges_s) + "," + str(cg_edges_t) + "],\n")
+            file.write('"method_names": ' + json.dumps(method_names) + "}")
 
 
             logger.info("End Decompilation")

@@ -820,3 +820,91 @@ class Node:
         self.id = n
         self.title = s
         self.children = []
+
+# Based on method2dot
+def method2dotaggregated(mx):
+    """
+    Export analysis method to aggregated networkx format.
+    A control flow graph is created by using the concept of BasicBlocks.
+    Each BasicBlock is a sequence of opcode without any jumps or branch.
+    :param mx: :class:`~androguard.core.analysis.analysis.MethodAnalysis`
+    :param colors: dict of colors to use, if colors is None the default colors are used
+    :returns: a string which contains the networkx graph containing aggregated DEX instructions
+    """
+
+    method = mx.get_method()
+
+    # This is used as a seed to create unique hashes for the nodes
+    sha256 = hashlib.sha256((mx.get_method().get_class_name() + mx.get_method().get_name() + mx.get_method().get_descriptor()).encode("utf-8")).hexdigest()
+
+    new_links = []
+
+    import networkx as nx
+
+    graph = nx.DiGraph()
+    nodes = {}
+    node_text = ""
+    edge_text = ""
+
+    edges_to_be_processed = []
+
+    # Go through all basic blocks and create the CFG
+    for basic_block in mx.basic_blocks:
+        ins_idx = basic_block.start
+        block_id = hashlib.md5((sha256 + basic_block.get_name()).encode("utf-8")).hexdigest()
+
+        instruction_count_dict = {}
+
+        for instruction in basic_block.get_instructions():
+            if instruction.get_op_value() in (0x2b, 0x2c):
+                new_links.append((basic_block, ins_idx, instruction.get_ref_off() * 2 + ins_idx))
+            elif instruction.get_op_value() == 0x26:
+                new_links.append((basic_block, ins_idx, instruction.get_ref_off() * 2 + ins_idx))
+
+            instruction_name = instruction.get_op_value()
+            instruction_count_dict[instruction_name] = instruction_count_dict.get(instruction_name, 0) + 1
+
+
+            ins_idx += instruction.get_length()
+
+        values = None
+        # The last instruction is important and still set from the loop
+        # FIXME: what if there is no instruction in the basic block?
+        if instruction.get_op_value() in (0x2b, 0x2c) and len(basic_block.childs) > 1:
+            values = ["default"]
+            values.extend(basic_block.get_special_ins(ins_idx - instruction.get_length()).get_values())
+
+        node_label = ','.join([f'{instr}:{count}' for instr, count in instruction_count_dict.items()])
+        current_num = len(nodes)
+        graph.add_node(current_num, features=node_label)
+        nodes[block_id] = current_num
+
+
+        # updating dot edges
+        for DVMBasicMethodBlockChild in basic_block.childs:
+            child_id = hashlib.md5((sha256 + DVMBasicMethodBlockChild[-1].get_name()).encode("utf-8")).hexdigest()
+            edges_to_be_processed.append((block_id, child_id))
+
+        exception_analysis = basic_block.get_exception_analysis()
+        if exception_analysis:
+            for exception_elem in exception_analysis.exceptions:
+                exception_block = exception_elem[-1]
+                if exception_block:
+                    exception_id = hashlib.md5((sha256 + exception_block.get_name()).encode("utf-8")).hexdigest()
+                    edges_to_be_processed.append((block_id, exception_id))
+
+    # before not all nodes known...
+    for (parent, child) in edges_to_be_processed:
+        graph.add_edge(nodes[parent], nodes[child])
+
+    for link in new_links:
+        basic_block = link[0]
+        DVMBasicMethodBlockChild = mx.basic_blocks.get_basic_block(link[2])
+
+        if DVMBasicMethodBlockChild:
+            block_id = hashlib.md5((sha256 + basic_block.get_name()).encode("utf-8")).hexdigest()
+            child_id = hashlib.md5((sha256 + DVMBasicMethodBlockChild.get_name()).encode("utf-8")).hexdigest()
+
+        graph.add_edge(nodes[block_id], nodes[child_id])
+
+    return graph

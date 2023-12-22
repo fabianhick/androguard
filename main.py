@@ -70,6 +70,226 @@ def androarsc_main(arscobj, outp=None, package=None, typ=None, locale=None):
             fd.write(buff)
     else:
         sys.stdout.write(highlight(buff.decode("UTF-8"), get_lexer_by_name("xml"), TerminalFormatter()))
+### Added from older commit in androguard
+def androcg_main(verbose,
+                 APK,
+                 classname,
+                 methodname,
+                 descriptor,
+                 accessflag,
+                 no_isolated,
+                 show,
+                 output):
+    from androguard.core.androconf import show_logging
+    from androguard.core.bytecode import FormatClassToJava
+    from androguard.misc import AnalyzeAPK
+    import networkx as nx
+    import logging
+    log = logging.getLogger("androcfg")
+    if verbose:
+        show_logging(logging.INFO)
+
+    a, d, dx = AnalyzeAPK(APK)
+
+    entry_points = map(FormatClassToJava,
+                       a.get_activities() + a.get_providers() +
+                       a.get_services() + a.get_receivers())
+    entry_points = list(entry_points)
+
+    log.info("Found The following entry points by search AndroidManifest.xml: "
+             "{}".format(entry_points))
+
+    CG = dx.get_call_graph(classname,
+                           methodname,
+                           descriptor,
+                           accessflag,
+                           no_isolated,
+                           entry_points,
+                           )
+
+    write_methods = dict(gml=_write_gml,
+                         gexf=nx.write_gexf,
+                         gpickle=nx.write_gpickle,
+                         graphml=nx.write_graphml,
+                         yaml=nx.write_yaml,
+                         net=nx.write_pajek,
+                         )
+
+    if show:
+        plot(CG)
+    else:
+        writer = output.rsplit(".", 1)[1]
+        if writer in ["bz2", "gz"]:
+            writer = output.rsplit(".", 2)[1]
+        if writer not in write_methods:
+            print("Could not find a method to export files to {}!"
+                  .format(writer))
+            sys.exit(1)
+
+        write_methods[writer](CG, output)
+
+
+def plot(cg):
+    """
+    Plot the call graph using matplotlib
+    For larger graphs, this should not be used, as it is very slow
+    and probably you can not see anything on it.
+    :param cg: A networkx call graph to plot
+    """
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    pos = nx.spring_layout(cg)
+
+    internal = []
+    external = []
+
+    for n in cg.nodes:
+        if n.is_external():
+            external.append(n)
+        else:
+            internal.append(n)
+
+    nx.draw_networkx_nodes(cg, pos=pos, node_color='r', nodelist=internal)
+    nx.draw_networkx_nodes(cg, pos=pos, node_color='b', nodelist=external)
+    nx.draw_networkx_edges(cg, pos, arrows=True)
+    nx.draw_networkx_labels(cg, pos=pos, labels={x: "{}{}".format(x.class_name, x.name) for x in cg.nodes})
+    plt.draw()
+    plt.show()
+
+
+def _write_gml(G, path):
+    """
+    Wrapper around nx.write_gml
+    """
+    import networkx as nx
+    return nx.write_gml(G, path, stringizer=str)
+
+# Extension of export_apps_to_format, which also dumps CG and CFG in edge notation
+def export_cg_cfg(filename,
+                          s,
+                          output,
+                          methods_filter=None,
+                          jar=None,
+                          decompiler_type=None,
+                          form=None):
+    from androguard.misc import clean_file_name
+    from androguard.core.dex import DEX
+    from androguard.core.bytecode import method2dot, method2format, method2dotaggregated
+    from androguard.decompiler import decompiler
+    from androguard.core.bytecode import FormatClassToJava
+    import networkx as nx
+
+    logger.info("Dump information {} in {}".format(filename, output))
+
+    if not os.path.exists(output):
+        logger.info("Create directory %s" % output)
+        os.makedirs(output)
+    else:
+        logger.info("Clean directory %s" % output)
+        androconf.rrmdir(output)
+        os.makedirs(output)
+
+    methods_filter_expr = None
+    if methods_filter:
+        methods_filter_expr = re.compile(methods_filter)
+    
+    a, _, dx = s.get_objects_apk(filename)
+
+    cg_output = os.path.join(output, "callgraph.gml")
+    classname = '.*'
+    methodname = '.*'
+    descriptor = '.*'
+    accessflag = '.*'
+    no_isolated = False
+
+    entry_points = map(FormatClassToJava,
+                    a.get_activities() + a.get_providers() +
+                    a.get_services() + a.get_receivers())
+    entry_points = list(entry_points)
+
+    logger.info("Found The following entry points by search AndroidManifest.xml: "  "{}".format(entry_points))
+
+    CG, cg_nodes_by_label, cg_nodes_by_external  = dx.get_modified_call_graph(classname,
+                            methodname,
+                            descriptor,
+                            accessflag,
+                            no_isolated,
+                            entry_points,
+                            )
+
+    dump_classes = []
+    cfg_output = os.path.join(output, "data.json")
+    import networkx as nx
+    from collections import OrderedDict
+    import pandas as pd
+    import json
+
+    with open(cfg_output, 'a') as file:
+        methods = OrderedDict()
+        method_names = []
+        file.write('{"acfg_list": [')
+        for _, vm, vmx in s.get_objects_dex():
+            logger.info("Decompilation ...", end=' ')
+            sys.stdout.flush()
+
+            logger.info("Dumping cfgs...")
+            
+            first_iteration = True
+
+            for method in vm.get_methods():
+                if methods_filter_expr:
+                    msig = "{}{}{}".format(method.get_class_name(), method.get_name(),
+                                    method.get_descriptor())
+                    if not methods_filter_expr.search(msig):
+                        continue
+
+                if len(list(vmx.get_method(method).get_method().get_instructions())) == 0:
+                    continue
+                method_name = "{}{}{}".format(method.get_class_name(), method.get_name(),method.get_descriptor())
+                method_id = len(methods)
+                methods[method_name] = method_id
+                method_names.append(method_name)
+
+                cfg = method2dotaggregated(vmx.get_method(method))
+                
+                cfgdf = nx.to_pandas_edgelist(cfg)
+
+                cfg_edges_s = list(cfgdf.source)
+                cfg_edges_t = list(cfgdf.target)
+                cfg_features = nx.get_node_attributes(cfg, "features")
+                assert len(cfg_features) == cfg.number_of_nodes()
+                data = {"edges": [cfg_edges_s, cfg_edges_t], "features": cfg_features}
+                if(not first_iteration):
+                    file.write(",\n")
+                else:
+                    first_iteration = False
+                file.write(json.dumps(data))
+            logger.info("End dumping cfgs!")
+            
+            rename_nodes = {}
+            # Filter the call graph attributes by external or not and rename the nodes in the new graph
+            num_local_functions = len(method_names)
+            counter = num_local_functions
+            CG = nx.convert_node_labels_to_integers(CG)
+            for i in range(len(cg_nodes_by_label)):
+                if cg_nodes_by_external[i]:
+                    rename_nodes[i] = counter
+                    counter = counter + 1
+                    method_names.append(cg_nodes_by_label[i])
+                else:
+                    rename_nodes[i] = method_names.index(cg_nodes_by_label[i])
+
+            CG = nx.relabel_nodes(CG, rename_nodes)
+
+            cgdf = nx.to_pandas_edgelist(CG)
+            cg_edges_s = list(cgdf.source)
+            cg_edges_t = list(cgdf.target)
+
+            file.write('],\n "cg_edges": [' + str(cg_edges_s) + "," + str(cg_edges_t) + "],\n")
+            file.write('"method_names": ' + json.dumps(method_names) + "}")
+
+
+            logger.info("End Decompilation")
 
 
 def export_apps_to_format(filename,

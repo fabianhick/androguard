@@ -32,7 +32,7 @@ from main import (androarsc_main,
 def entry_point(verbosity):
     if verbosity == None:
        util.set_log("INFO")
-    logger.add("androguard.log", retention="10 days")
+#    logger.add("androguard.log", retention="10 days") # DISABLE LOGGING FOR BATCH PROCESSING
     
 
 @entry_point.command()
@@ -456,6 +456,72 @@ def dump(package_name, modules):
         $ androguard dump package_name
     """
     androdump_main(package_name, modules)
+
+@entry_point.command()
+@click.option(
+    '--input', '-i', 'input_',
+    type=click.Path(exists=True, dir_okay=False, file_okay=True),
+    help='APK to parse (legacy option)',
+)
+@click.argument(
+    'file_',
+    type=click.Path(exists=True, dir_okay=False, file_okay=True),
+    required=False,
+)
+@click.option(
+    '--output', '-o',
+    required=True,
+    help='output directory. If the output folder already exsist, '
+         'it will be overwritten!',
+)
+@click.option(
+    '--format', '-f', 'format_',
+    help='Additionally write control flow graphs for each method, specify '
+         'the format for example png, jpg, raw (write dot file), ...',
+)
+@click.option(
+    '--jar', '-j',
+    is_flag=True,
+    default=False,
+    help='Use DEX2JAR to create a JAR file',
+)
+@click.option(
+    '--limit', '-l',
+    help='Limit to certain methods only by regex (default: \'.*\')',
+)
+@click.option(
+    '--decompiler', '-d',
+    help='Use a different decompiler (default: DAD)',
+)
+def cgdecompile(input_, file_, output, format_, jar, limit, decompiler):
+    """
+    Decompile an APK and create Call Graphs and Control Flow Graphs in Edge Notation.
+    Example:
+    \b
+        $ androguard resources.arsc
+    """
+    from androguard import session
+    if file_ and input_:
+        print("Can not give --input and positional argument! "
+              "Please use only one of them!", file=sys.stderr)
+        sys.exit(1)
+
+    if not input_ and not file_:
+        print("Give one file to decode!", file=sys.stderr)
+        sys.exit(1)
+
+    if input_:
+        fname = input_
+    else:
+        fname = file_
+
+    s = session.Session(db_name=output[:-4] + '_androguard.db')
+    with open(fname, "rb") as fd:
+        s.add(fname, fd.read())
+    export_cg_cfg(fname, s, output[:-4], limit,
+                          jar, decompiler, format_)
+
+
 
 if __name__ == '__main__':
     entry_point()
